@@ -1,3 +1,4 @@
+let gameLoopId;
 class EventEmitter {
 	constructor() {
 		this.listeners = {};
@@ -14,6 +15,9 @@ class EventEmitter {
 		if (this.listeners[message]) {
 			this.listeners[message].forEach((l) => l(message, payload));
 		}
+	}
+	clear() {
+		this.listeners = {};
 	}
 }
 
@@ -127,6 +131,7 @@ function intersectRect(r1, r2) {
 }
 
 const Messages = {
+	KEY_EVENT_ENTER: 'KEY_EVENT_ENTER',
 	KEY_EVENT_UP: 'KEY_EVENT_UP',
 	KEY_EVENT_DOWN: 'KEY_EVENT_DOWN',
 	KEY_EVENT_LEFT: 'KEY_EVENT_LEFT',
@@ -134,6 +139,8 @@ const Messages = {
 	KEY_EVENT_SPACE: 'KEY_EVENT_SPACE',
 	COLLISION_ENEMY_LASER: 'COLLISION_ENEMY_LASER',
 	COLLISION_ENEMY_HERO: 'COLLISION_ENEMY_HERO',
+	GAME_END_LOSS: 'GAME_END_LOSS',
+	GAME_END_WIN: 'GAME_END_WIN',
 };
 
 let heroImg,
@@ -146,9 +153,7 @@ let heroImg,
 	hero,
 	eventEmitter = new EventEmitter();
 
-// EVENTS
 let onKeyDown = function (e) {
-	// console.log(e.keyCode);
 	switch (e.keyCode) {
 		case 37:
 		case 39:
@@ -164,7 +169,6 @@ let onKeyDown = function (e) {
 
 window.addEventListener('keydown', onKeyDown);
 
-// TODO make message driven
 window.addEventListener('keyup', (evt) => {
 	if (evt.key === 'ArrowUp') {
 		eventEmitter.emit(Messages.KEY_EVENT_UP);
@@ -176,6 +180,8 @@ window.addEventListener('keyup', (evt) => {
 		eventEmitter.emit(Messages.KEY_EVENT_RIGHT);
 	} else if (evt.keyCode === 32) {
 		eventEmitter.emit(Messages.KEY_EVENT_SPACE);
+	} else if (evt.key === 'Enter') {
+		eventEmitter.emit(Messages.KEY_EVENT_ENTER);
 	}
 });
 
@@ -234,6 +240,10 @@ function initGame() {
 	createEnemies();
 	createHero();
 
+	eventEmitter.on(Messages.KEY_EVENT_ENTER, () => {
+		resetGame();
+	});
+
 	eventEmitter.on(Messages.KEY_EVENT_UP, () => {
 		hero.y -= 5;
 	});
@@ -243,36 +253,75 @@ function initGame() {
 	});
 
 	eventEmitter.on(Messages.KEY_EVENT_LEFT, () => {
-		hero.x -= 5;
+		hero.x -= 20;
 	});
 
 	eventEmitter.on(Messages.KEY_EVENT_RIGHT, () => {
-		hero.x += 5;
+		hero.x += 20;
 	});
 
 	eventEmitter.on(Messages.KEY_EVENT_SPACE, () => {
 		if (hero.canFire()) {
 			hero.fire();
 		}
-		// console.log('cant fire - cooling down')
 	});
 
 	eventEmitter.on(Messages.COLLISION_ENEMY_LASER, (_, { first, second }) => {
 		first.dead = true;
 		second.dead = true;
 		hero.incrementPoints();
+
+		if (isEnemiesDead()) {
+			eventEmitter.emit(Messages.GAME_END_WIN);
+		}
 	});
 
 	eventEmitter.on(Messages.COLLISION_ENEMY_HERO, (_, { enemy }) => {
 		enemy.dead = true;
 		hero.decrementLife();
+		if (isHeroDead()) {
+			eventEmitter.emit(Messages.GAME_END_LOSS);
+			return; // loss before victory
+		}
+		if (isEnemiesDead()) {
+			eventEmitter.emit(Messages.GAME_END_WIN);
+		}
+	});
+
+	eventEmitter.on(Messages.GAME_END_WIN, () => {
+		endGame(true);
+	});
+	eventEmitter.on(Messages.GAME_END_LOSS, () => {
+		endGame(false);
 	});
 }
 
-function drawLife() {
-	// TODO, 35, 27
-	//
+function endGame(win) {
+	clearInterval(gameLoopId);
 
+	// set delay so we are sure any paints have finished
+	setTimeout(() => {
+		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		ctx.fillStyle = 'black';
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		if (win) {
+			displayMessage('You win! Press [Enter] to start a new game.', 'green');
+		} else {
+			displayMessage('You died! Press [Enter] to start a new game.');
+		}
+	}, 200);
+}
+
+function isHeroDead() {
+	return hero.life <= 0;
+}
+
+function isEnemiesDead() {
+	const enemies = gameObjects.filter((go) => go.type === 'Enemy' && !go.dead);
+	return enemies.length === 0;
+}
+
+function drawLife() {
 	const START_POS = canvas.width - 180;
 	for (let i = 0; i < hero.life; i++) {
 		ctx.drawImage(lifeImg, START_POS + 45 * (i + 1), canvas.height - 37);
@@ -290,6 +339,30 @@ function drawText(message, x, y) {
 	ctx.fillText(message, x, y);
 }
 
+function displayMessage(message, color = 'red') {
+	ctx.font = '30px Arial';
+	ctx.fillStyle = color;
+	ctx.textAlign = 'center';
+	ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+}
+
+function resetGame() {
+	if (gameLoopId) {
+		clearInterval(gameLoopId);
+		eventEmitter.clear();
+		initGame();
+		gameLoopId = setInterval(() => {
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			ctx.fillStyle = 'black';
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			drawPoints();
+			drawLife();
+			updateGameObjects();
+			drawGameObjects(ctx);
+		}, 100);
+	}
+}
+
 window.onload = async () => {
 	canvas = document.getElementById('canvas');
 	ctx = canvas.getContext('2d');
@@ -299,7 +372,7 @@ window.onload = async () => {
 	lifeImg = await loadTexture('assets/life.png');
 
 	initGame();
-	let gameLoopId = setInterval(() => {
+	gameLoopId = setInterval(() => {
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		ctx.fillStyle = 'black';
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
