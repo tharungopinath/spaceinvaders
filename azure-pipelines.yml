@@ -1,0 +1,18 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- group: swa-secrets
+
+steps:
+- checkout: self
+
+- task: AzureStaticWebApp@0
+  inputs:
+    app_location: "/"
+    output_location: ""
+    skip_app_build: true
+    azure_static_web_apps_api_token: "$(AZURE_STATIC_WEB_APPS_API_TOKEN)"
